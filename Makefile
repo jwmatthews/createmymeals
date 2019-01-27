@@ -22,6 +22,9 @@ dep:
 dep-update:
 	$(Q)dep ensure -update -v
 
+test:
+	go test -timeout 30s $(REPO)/pkg/...
+
 clean:
 	$(Q)rm build/list_recipes*
 
