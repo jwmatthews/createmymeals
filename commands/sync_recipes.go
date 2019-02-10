@@ -48,19 +48,6 @@ func initDatabase() (err error) {
 	return err
 }
 
-/*
-statement, _ = database.Prepare("INSERT INTO people (firstname, lastname) VALUES (?, ?)")
-	statement.Exec("Nic", "Raboy")
-	rows, _ := database.Query("SELECT id, firstname, lastname FROM people")
-	var id int
-	var firstname string
-	var lastname string
-	for rows.Next() {
-		rows.Scan(&id, &firstname, &lastname)
-		fmt.Println(strconv.Itoa(id) + ": " + firstname + " " + lastname)
-	}
-*/
-
 func fetchMessage(svc *gmail.Service, m *gmail.Message) *gmail.Message {
 	fmt.Println("Fetching message id", m.Id)
 	msg, err := svc.Users.Messages.Get("me", m.Id).Format("full").Do()
