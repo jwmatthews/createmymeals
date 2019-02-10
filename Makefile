@@ -1,17 +1,29 @@
+BUILD_VERBOSE=1
 VERSION = $(shell git describe --dirty --tags --always)
 REPO = github.com/jwmatthews/createmymeals
 BUILD_PATH = $(REPO)/commands
 PKGS = $(shell go list ./... | grep -v /vendor/)
+BINARY_NAME=sync_recipes
 
-export CGO_ENABLED:=0
+export CGO_ENABLED:=1
 ifeq ($(BUILD_VERBOSE),1)
        Q =
 else
        Q = @
 endif
 
+BIN_DIR := $(GOPATH)/bin
+GOMETALINTER := $(BIN_DIR)/gometalinter
 
-all: format build/list_recipes
+.PHONY: all test format dep clean lint build install release_x86_64 release
+all: format build
+
+run: build
+	pushd . && cd build && ./${BINARY_NAME} && popd
+
+$(GOMETALINTER):
+	go get -u github.com/alecthomas/gometalinter
+	gometalinter --install &> /dev/null
 
 format:
 	$(Q)go fmt $(PKGS)
@@ -25,25 +37,26 @@ dep-update:
 test:
 	go test -timeout 30s $(REPO)/pkg/...
 
-clean:
-	$(Q)rm build/list_recipes*
+lint: $(GOMETALINTER)
+	gometalinter ./... --vendor
 
-.PHONY: all test format dep clean
+clean:
+	$(Q)rm build/${BINARY_NAME}*
 
 install:
 	$(Q)go install $(BUILD_PATH)
 
 release_x86_64 := \
-	build/list_recipes-$(VERSION)-x86_64-linux-gnu \
-	build/list_recipes-$(VERSION)-x86_64-apple-darwin
+	build/${BINARY_NAME}-$(VERSION)-x86_64-linux-gnu \
+	build/${BINARY_NAME}-$(VERSION)-x86_64-apple-darwin
 
 release: clean $(release_x86_64) $(release_x86_64:=.asc)
 
-build/list_recipes-%-x86_64-linux-gnu: GOARGS = GOOS=linux GOARCH=amd64
-build/list_recipes-%-x86_64-apple-darwin: GOARGS = GOOS=darwin GOARCH=amd64
+build/${BINARY_NAME}-%-x86_64-linux-gnu: GOARGS = GOOS=linux GOARCH=amd64
+build/${BINARY_NAME}-%-x86_64-apple-darwin: GOARGS = GOOS=darwin GOARCH=amd64
 
-build/%:
-	$(Q)$(GOARGS) go build -o $@ $(BUILD_PATH)
+build: lint
+	$(Q)$(GOARGS) go build -o build/${BINARY_NAME} $(BUILD_PATH)
 
 build/%.asc:
 	$(Q){ \
@@ -58,7 +71,7 @@ build/%.asc:
 	fi; \
 	}
 
-.PHONY: install release_x86_64 release
+
 
 
 

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"database/sql"
 	"flag"
 	"fmt"
 	"log"
 	"strings"
 	"sync"
+
+	_ "github.com/mattn/go-sqlite3"
 
 	"google.golang.org/api/gmail/v1"
 
@@ -14,16 +17,95 @@ import (
 
 var flagSerial bool
 var flagStore bool
+var gDatabase *sql.DB
 
 func init() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	flag.BoolVar(&flagSerial, "serial", false, "Run in serial mode if set")
-	flag.BoolVar(&flagStore, "store", false, "Store messages in local database")
+	flag.BoolVar(&flagStore, "store", true, "Store messages in local database")
 }
+
+func initDatabase() (err error) {
+	fmt.Println("Initialize Database")
+	gDatabase, err = sql.Open("sqlite3", "./recipes.db")
+	if err != nil {
+		log.Fatal("Failed to open database:", err)
+	}
+	statement, err := gDatabase.Prepare(`
+		CREATE TABLE IF NOT EXISTS messages (
+				id INTEGER PRIMARY KEY,
+				fromaddr TEXT,
+				subject TEXT,
+				body TEXT,
+				urls TEXT,
+				date INTEGER,
+				messageID TEXT NOT NULL UNIQUE
+		)`)
+	if err != nil {
+		log.Fatal("Failed to prepare statement:", err)
+	}
+	_, err = statement.Exec()
+	return err
+}
+
+/*
+statement, _ = database.Prepare("INSERT INTO people (firstname, lastname) VALUES (?, ?)")
+	statement.Exec("Nic", "Raboy")
+	rows, _ := database.Query("SELECT id, firstname, lastname FROM people")
+	var id int
+	var firstname string
+	var lastname string
+	for rows.Next() {
+		rows.Scan(&id, &firstname, &lastname)
+		fmt.Println(strconv.Itoa(id) + ": " + firstname + " " + lastname)
+	}
+*/
 
 func fetchMessage(svc *gmail.Service, m *gmail.Message) *gmail.Message {
 	fmt.Println("Fetching message id", m.Id)
-	msg, _ := svc.Users.Messages.Get("me", m.Id).Format("full").Do()
+	msg, err := svc.Users.Messages.Get("me", m.Id).Format("full").Do()
+	if err != nil {
+		log.Fatal("Unable to fetch message:", err)
+	}
 	return msg
+}
+
+func storeMessage(msg *gmail.Message) (err error) {
+	if !flagStore {
+		return err
+	}
+	var from, subject, body, urls, messageID string
+	var date int64
+	from = messages.GetFrom(msg.Payload.Headers)
+	date = msg.InternalDate
+	subject = messages.GetSubject(msg.Payload.Headers)
+	body = messages.GetMessageContent(msg.Payload)
+	urlsRaw := messages.GetAllURLs(body)
+	if len(urlsRaw) > 0 {
+		urls = strings.Join(urlsRaw, ", ")
+	} else {
+		urls = ""
+	}
+	messageID = msg.Id
+
+	// https://www.sqlite.org/lang_UPSERT.html
+	upsertRawText := `
+		INSERT INTO messages(fromaddr, subject, body, urls, date, messageID)
+  	VALUES(?, ?, ?, ?, ?, ?)
+  	ON CONFLICT(messageID) DO UPDATE SET
+			fromaddr=excluded.fromaddr,
+			subject=excluded.subject,
+			body=excluded.body,
+			urls=excluded.urls,
+			date=excluded.date
+  	WHERE excluded.date>messages.date;
+	`
+	statement, err := gDatabase.Prepare(upsertRawText)
+	if err != nil {
+		log.Fatal("Unable to prepare upsert statement:", err)
+	}
+	_, err = statement.Exec(from, subject, body, urls, date, messageID)
+	return err
 }
 
 func displayMessages(c chan *gmail.Message) {
@@ -38,6 +120,10 @@ func displayMessages(c chan *gmail.Message) {
 			urlOutput = "N/A"
 		}
 		fmt.Println(msg.Id, subject, "\n\t", urlOutput)
+		err := storeMessage(msg)
+		if err != nil {
+			log.Fatalf("%s\nUnable to store: %s", err, msg.Id)
+		}
 	}
 }
 
@@ -45,7 +131,7 @@ func processMessages(svc *gmail.Service, req *gmail.UsersMessagesListCall, concu
 
 	var producerGroup sync.WaitGroup
 	var consumerGroup sync.WaitGroup
-	var messgChannel = make(chan *gmail.Message, 0)
+	var messgChannel = make(chan *gmail.Message, 3)
 
 	//
 	// Creating the handling goroutine first so that the serial processing case
@@ -100,6 +186,10 @@ func processMessages(svc *gmail.Service, req *gmail.UsersMessagesListCall, concu
 
 func main() {
 	flag.Parse()
+	err := initDatabase()
+	if err != nil {
+		log.Fatalf("Unable to initialize database: %s", err)
+	}
 	concurrent := !flagSerial
 	client := messages.GetClient()
 	svc, err := gmail.New(client)

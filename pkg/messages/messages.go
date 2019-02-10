@@ -69,11 +69,17 @@ func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
 
 // Retrieves a token from a local file.
 func tokenFromFile(file string) (*oauth2.Token, error) {
+	// nolint: gosec
 	f, err := os.Open(file)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		err = f.Close()
+		if err != nil {
+			log.Fatalln(err)
+		}
+	}()
 	tok := &oauth2.Token{}
 	err = json.NewDecoder(f).Decode(tok)
 	return tok, err
@@ -86,8 +92,16 @@ func saveToken(path string, token *oauth2.Token) {
 	if err != nil {
 		log.Fatalf("Unable to cache oauth token: %v", err)
 	}
-	defer f.Close()
-	json.NewEncoder(f).Encode(token)
+	defer func() {
+		err = f.Close()
+		if err != nil {
+			log.Fatalln(err)
+		}
+	}()
+	err = json.NewEncoder(f).Encode(token)
+	if err != nil {
+		log.Fatalln(err)
+	}
 }
 
 // GetMessages will read a page of messages, returning a token to iterate on for next page
@@ -112,6 +126,15 @@ func getRFC282Headers(headers []*gmail.MessagePartHeader) (from string, subject 
 		case "From":
 			from = h.Value
 		}
+	}
+	return
+}
+
+// GetFrom will return the sender of this email
+func GetFrom(headers []*gmail.MessagePartHeader) (from string) {
+	from, _, err := getRFC282Headers(headers)
+	if err != nil {
+		log.Fatalf("Unable to parse headers: %v", err)
 	}
 	return
 }
@@ -154,8 +177,6 @@ func GetAllURLs(message string) []string {
 	for i := range allUrls {
 		if strings.HasPrefix(allUrls[i], "http") {
 			urls = append(urls, allUrls[i])
-		} else {
-			//fmt.Println("Skipping", allUrls[i])
 		}
 	}
 	return urls
